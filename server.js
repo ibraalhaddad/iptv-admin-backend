@@ -4,11 +4,14 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 
 const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const packageRoutes = require('./routes/packages');
+const hostRoutes = require('./routes/hosts');
+const lineRoutes = require('./routes/lines');
 const settingsRoutes = require('./routes/settings');
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -22,10 +25,11 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // المسارات
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/packages', packageRoutes);
+app.use('/api/hosts', hostRoutes);
+app.use('/api/lines', lineRoutes);
 app.use('/api/settings', settingsRoutes);
-app.get('/', (req, res) => {
-  res.send('API is running');
-});
 
 // معالجة الأخطاء
 app.use((err, req, res, next) => {
@@ -34,4 +38,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`));

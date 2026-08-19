@@ -3,6 +3,11 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const auth = require('../middleware/auth');
+
+router.get('/me', auth, async (req, res) => {
+  res.json({ user: req.user });
+});
 
 // تسجيل مستخدم جديد (من لوحة التحكم أو التطبيق)
 router.post('/register', async (req, res) => {

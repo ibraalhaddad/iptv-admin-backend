@@ -1,106 +1,102 @@
 const express = require('express');
 const router = express.Router();
 const Subscription = require('../models/Subscription');
-const Plan = require('../models/Plan');
+const Package = require('../models/Package');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
-const adminAuth = require('../middleware/adminAuth');
 
-// الحصول على جميع الخطط
-router.get('/plans', async (req, res) => {
+// الحصول على جميع الاشتراكات (Admin)
+router.get('/', auth, auth.requireRole('admin'), async (req, res) => {
   try {
-    const plans = await Plan.find({ isActive: true }).sort({ sortOrder: 1 });
-    res.json(plans);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// التحقق من حالة الاشتراك للمستخدم الحالي
-router.get('/status', auth, async (req, res) => {
-  try {
-    const sub = await Subscription.findOne({ user: req.user.userId })
-      .populate('plan')
-      .sort({ createdAt: -1 });
-
-    if (!sub) return res.json({ hasSubscription: false });
-
-    const now = new Date();
-    if (sub.status === 'active' && sub.endDate < now) {
-      sub.status = 'expired';
-      await sub.save();
-    }
-
-    res.json({
-      hasSubscription: true,
-      status: sub.status,
-      plan: sub.plan?.name,
-      endDate: sub.endDate,
-      daysRemaining: Math.ceil((sub.endDate - now) / (1000 * 60 * 60 * 24)),
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// تفعيل اشتراك (للمستخدم)
-router.post('/activate', auth, async (req, res) => {
-  try {
-    const { planCode } = req.body;
-    const plan = await Plan.findOne({ code: planCode, isActive: true });
-    if (!plan) return res.status(404).json({ message: 'الخطة غير موجودة' });
-
-    const startDate = new Date();
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + plan.durationDays);
-
-    let sub = await Subscription.findOne({ user: req.user.userId }).sort({ createdAt: -1 });
-
-    if (sub && sub.status === 'active' && sub.endDate > startDate) {
-      // تمديد
-      startDate.setTime(sub.endDate.getTime());
-      endDate.setTime(startDate.getTime() + plan.durationDays * 86400000);
-    }
-
-    sub = new Subscription({
-      user: req.user.userId,
-      plan: plan._id,
-      startDate,
-      endDate,
-      status: 'active',
-      amountPaid: plan.price,
-    });
-    await sub.save();
-
-    res.json({ message: 'تم تفعيل الاشتراك', endDate });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// إدارة الاشتراكات (للمدير)
-router.get('/admin', adminAuth, async (req, res) => {
-  try {
-    const subs = await Subscription.find()
+    const subscriptions = await Subscription.find()
       .populate('user', 'username email')
-      .populate('plan', 'name durationDays price')
-      .sort({ createdAt: -1 });
-    res.json(subs);
+      .populate('package', 'name durationDays maxConnections')
+      .populate('host', 'name url');
+    res.json(subscriptions);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// تعديل حالة اشتراك (للمدير)
-router.put('/admin/:id', adminAuth, async (req, res) => {
+// إنشاء اشتراك جديد (Admin)
+router.post('/', auth, auth.requireRole('admin'), async (req, res) => {
   try {
-    const { status, endDate } = req.body;
-    const sub = await Subscription.findById(req.params.id);
-    if (!sub) return res.status(404).json({ message: 'غير موجود' });
-    if (status) sub.status = status;
-    if (endDate) sub.endDate = new Date(endDate);
-    await sub.save();
-    res.json(sub);
+    const { userId, packageId, hostId, startDate, notes } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const pkg = await Package.findById(packageId);
+    if (!pkg) return res.status(404).json({ message: 'Package not found' });
+
+    const start = startDate ? new Date(startDate) : new Date();
+    const end = new Date(start);
+    end.setDate(end.getDate() + pkg.durationDays);
+
+    const subscription = new Subscription({
+      user: userId,
+      package: packageId,
+      host: hostId || null,
+      startDate: start,
+      endDate: end,
+      status: 'active',
+      notes
+    });
+
+    await subscription.save();
+    res.status(201).json(subscription);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// تجديد اشتراك
+router.put('/:id/renew', auth, auth.requireRole('admin'), async (req, res) => {
+  try {
+    const subscription = await Subscription.findById(req.params.id);
+    if (!subscription) return res.status(404).json({ message: 'Subscription not found' });
+
+    const pkg = await Package.findById(subscription.package);
+    if (!pkg) return res.status(404).json({ message: 'Package not found' });
+
+    const newEnd = new Date(subscription.endDate);
+    newEnd.setDate(newEnd.getDate() + pkg.durationDays);
+
+    subscription.endDate = newEnd;
+    subscription.status = 'active';
+    await subscription.save();
+
+    res.json(subscription);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// تغيير حالة الاشتراك
+router.put('/:id/status', auth, auth.requireRole('admin'), async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['active', 'expired', 'suspended', 'cancelled'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+    const subscription = await Subscription.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+    if (!subscription) return res.status(404).json({ message: 'Subscription not found' });
+    res.json(subscription);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// حذف اشتراك
+router.delete('/:id', auth, auth.requireRole('admin'), async (req, res) => {
+  try {
+    const deleted = await Subscription.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Subscription not found' });
+    res.json({ message: 'Subscription deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
