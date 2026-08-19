@@ -8,6 +8,10 @@ const LineSchema = new mongoose.Schema({
   endDate: { type: Date, required: true },
   maxConnections: { type: Number, required: true },
   status: { type: String, enum: ['active', 'expired', 'suspended', 'cancelled'], default: 'active' },
+  devices: [{ type: String }], // قائمة معرفات الأجهزة المسجلة
+  autoRenew: { type: Boolean, default: false },
+  amountPaid: { type: Number, default: 0 },
+  couponUsed: { type: String, default: '' },
   notes: { type: String },
   createdAt: { type: Date, default: Date.now }
 });

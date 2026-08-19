@@ -8,6 +8,8 @@ const userRoutes = require('./routes/users');
 const packageRoutes = require('./routes/packages');
 const hostRoutes = require('./routes/hosts');
 const lineRoutes = require('./routes/lines');
+const couponRoutes = require('./routes/coupons');
+const statsRoutes = require('./routes/stats');
 const settingsRoutes = require('./routes/settings');
 
 const app = express();
@@ -29,6 +31,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/hosts', hostRoutes);
 app.use('/api/lines', lineRoutes);
+app.use('/api/coupons', couponRoutes);
+app.use('/api/stats', statsRoutes);
 app.use('/api/settings', settingsRoutes);
 
 // معالجة الأخطاء

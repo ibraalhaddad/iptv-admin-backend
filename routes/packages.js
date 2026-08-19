@@ -6,7 +6,7 @@ const auth = require('../middleware/auth');
 // الحصول على جميع الباقات
 router.get('/', auth, async (req, res) => {
   try {
-    const packages = await Package.find().sort({ createdAt: -1 });
+    const packages = await Package.find().sort({ sortOrder: 1, createdAt: -1 });
     res.json(packages);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -16,13 +16,34 @@ router.get('/', auth, async (req, res) => {
 // إنشاء باقة (Admin)
 router.post('/', auth, auth.requireRole('admin'), async (req, res) => {
   try {
-    const { name, durationDays, maxConnections, type, price, isActive } = req.body;
+    const {
+      name, code, description, durationDays, maxConnections,
+      type, price, currency, features, isActive, sortOrder
+    } = req.body;
+
     if (!name || !durationDays || !maxConnections) {
       return res.status(400).json({ message: 'Name, durationDays and maxConnections are required' });
     }
-    const existing = await Package.findOne({ name });
-    if (existing) return res.status(400).json({ message: 'Package name already exists' });
-    const pkg = new Package({ name, durationDays, maxConnections, type, price, isActive });
+
+    // التحقق من وجود كود مشابه
+    if (code) {
+      const existing = await Package.findOne({ code });
+      if (existing) return res.status(400).json({ message: 'Package code already exists' });
+    }
+
+    const pkg = new Package({
+      name,
+      code,
+      description,
+      durationDays,
+      maxConnections,
+      type,
+      price,
+      currency,
+      features,
+      isActive,
+      sortOrder
+    });
     await pkg.save();
     res.status(201).json(pkg);
   } catch (err) {
