@@ -44,7 +44,7 @@ router.post('/', auth, auth.requireRole('admin'), async (req, res) => {
 // تعديل كوبون
 router.put('/:id', auth, auth.requireRole('admin'), async (req, res) => {
   try {
-    const updated = await Coupon.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updated = await Coupon.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
     if (!updated) return res.status(404).json({ message: 'Coupon not found' });
     res.json(updated);
   } catch (err) {

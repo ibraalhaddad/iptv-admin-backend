@@ -26,7 +26,7 @@ router.post('/', auth, auth.requireRole('admin'), async (req, res) => {
 
 router.put('/:id', auth, auth.requireRole('admin'), async (req, res) => {
   try {
-    const updated = await Host.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updated = await Host.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
     if (!updated) return res.status(404).json({ message: 'Host not found' });
     res.json(updated);
   } catch (err) {

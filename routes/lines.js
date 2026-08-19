@@ -166,7 +166,7 @@ router.put('/:id/status', auth, auth.requireRole('admin'), async (req, res) => {
     if (!['active', 'expired', 'suspended', 'cancelled'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
-    const line = await Line.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    const line = await Line.findByIdAndUpdate(req.params.id, { status }, { returnDocument: 'after' });
     if (!line) return res.status(404).json({ message: 'Line not found' });
     res.json(line);
   } catch (err) {

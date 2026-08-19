@@ -15,12 +15,30 @@ router.get('/', auth, auth.requireRole('admin'), async (req, res) => {
     const activeLines = await Line.countDocuments({ status: 'active' });
     const expiredLines = await Line.countDocuments({ status: 'expired' });
     const suspendedLines = await Line.countDocuments({ status: 'suspended' });
-    const totalDevices = await Line.aggregate([
-      { $project: { deviceCount: { $size: '$devices' } } },
-      { $group: { _id: null, total: { $sum: '$deviceCount' } } }
+
+    // إجمالي الأجهزة: نستخدم $ifNull لتفادي خطأ إذا كانت devices غير موجودة أو ليست مصفوفة
+    const totalDevicesAgg = await Line.aggregate([
+      {
+        $project: {
+          deviceCount: { $size: { $ifNull: ['$devices', []] } }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$deviceCount' }
+        }
+      }
     ]);
-    const totalRevenue = await Line.aggregate([
-      { $group: { _id: null, total: { $sum: '$amountPaid' } } }
+
+    // إجمالي الإيرادات: نستخدم $ifNull لتفادي خطأ إذا كانت amountPaid غير موجودة
+    const totalRevenueAgg = await Line.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ['$amountPaid', 0] } }
+        }
+      }
     ]);
 
     res.json({
@@ -30,10 +48,11 @@ router.get('/', auth, auth.requireRole('admin'), async (req, res) => {
       activeLines,
       expiredLines,
       suspendedLines,
-      totalDevices: totalDevices.length > 0 ? totalDevices[0].total : 0,
-      totalRevenue: totalRevenue.length > 0 ? totalRevenue[0].total : 0
+      totalDevices: totalDevicesAgg.length > 0 ? totalDevicesAgg[0].total : 0,
+      totalRevenue: totalRevenueAgg.length > 0 ? totalRevenueAgg[0].total : 0
     });
   } catch (err) {
+    console.error('Stats error:', err);
     res.status(500).json({ message: err.message });
   }
 });
