@@ -23,6 +23,9 @@ mongoose.connect(process.env.MONGODB_URI)
 // المسارات
 app.use('/api/auth', authRoutes);
 app.use('/api/settings', settingsRoutes);
+app.get('/', (req, res) => {
+  res.send('API is running');
+});
 
 // معالجة الأخطاء
 app.use((err, req, res, next) => {
