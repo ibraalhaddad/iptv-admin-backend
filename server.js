@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
@@ -11,11 +12,14 @@ const lineRoutes = require('./routes/lines');
 const couponRoutes = require('./routes/coupons');
 const statsRoutes = require('./routes/stats');
 const settingsRoutes = require('./routes/settings');
+const notificationRoutes = require('./routes/notifications');
+const offerRoutes = require('./routes/offers');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(process.env.MONGODB_URI)
@@ -34,6 +38,8 @@ app.use('/api/lines', lineRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/offers', offerRoutes);
 
 // معالجة الأخطاء
 app.use((err, req, res, next) => {
