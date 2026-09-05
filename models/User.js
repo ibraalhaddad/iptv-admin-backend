@@ -1,12 +1,59 @@
 const mongoose = require('mongoose');
 
-const UserSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  email: { type: String, required: false },
-  role: { type: String, enum: ['admin', 'reseller', 'user'], default: 'user' },
-  isActive: { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now }
-});
+const schema = new mongoose.Schema(
+  {
+    username: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      unique: true,
+      index: true,
+    },
 
-module.exports = mongoose.model('User', UserSchema);
+    passwordHash: {
+      type: String,
+      required: true,
+      select: true,
+    },
+
+    displayName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+
+    role: {
+      type: String,
+      enum: ['super_admin', 'app_owner'],
+      default: 'app_owner',
+      index: true,
+    },
+
+    applicationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Application',
+      default: null,
+      index: true,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+schema.index(
+  { applicationId: 1, role: 1 }
+);
+
+module.exports = mongoose.model('User', schema);
