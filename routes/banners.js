@@ -2,8 +2,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { uploadBuffer, deleteFile, isConfigured } = require('../services/imagekitStorage');
 
 const Banner = require('../models/Banner');
 const Application = require('../models/Application');
@@ -21,43 +20,14 @@ const router = express.Router();
 /* Upload                                                                    */
 /* ========================================================================= */
 
-const uploadDir = path.join(
-  __dirname,
-  '..',
-  'uploads',
-  'banners'
-);
-
-fs.mkdirSync(uploadDir, {
-  recursive: true,
-});
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadDir);
-  },
-
-  filename: (_req, file, cb) => {
-    const ext = path
-      .extname(file.originalname || '')
-      .toLowerCase();
-
-    const safeExt = ext || '.jpg';
-
-    const name =
-      `${Date.now()}-` +
-      `${Math.random()
-        .toString(36)
-        .slice(2, 10)}` +
-      safeExt;
-
-    cb(null, name);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req,file,cb) => { const ok=['image/jpeg','image/png','image/webp','image/gif','image/svg+xml'].includes(file.mimetype); cb(ok?null:new Error('صيغة الصورة غير مدعومة'),ok); },
 });
+async function uploadBanner(req,applicationId){
+  if(!req.file)return null; if(!isConfigured()){const e=new Error('تخزين الصور غير مهيأ. أضف إعدادات ImageKit.');e.status=503;throw e;}
+  return uploadBuffer({buffer:req.file.buffer,fileName:req.file.originalname,contentType:req.file.mimetype,folder:`banners/${applicationId}`,tags:['iptv','banner',String(applicationId)]});
+}
 
 /* ========================================================================= */
 /* Helpers                                                                   */
@@ -130,9 +100,9 @@ function buildPayload(body = {}) {
       body.description || ''
     ).trim(),
 
-    imageUrl: String(
-      body.imageUrl || ''
-    ).trim(),
+    imageUrl: String(body.imageUrl || '').trim(),
+
+    imageFileId: String(body.imageFileId || '').trim(),
 
     buttonText: String(
       body.buttonText || ''
@@ -410,6 +380,7 @@ router.put(
         });
       }
 
+      const existingBanner = await Banner.findOne(scopeFilter(req, { _id: req.params.id })).lean();
       const banner =
         await Banner.findOneAndUpdate(
           scopeFilter(
@@ -430,10 +401,10 @@ router.put(
           );
 
       if (!banner) {
-        return res.status(404).json({
-          message:
-            'الإعلان غير موجود',
-        });
+        return res.status(404).json({ message: 'الإعلان غير موجود' });
+      }
+      if (existingBanner?.imageFileId && existingBanner.imageFileId !== banner.imageFileId) {
+        try { await deleteFile(existingBanner.imageFileId); } catch (error) { console.warn('[Banners PUT] ImageKit:', error.message); }
       }
 
       return res.json({
@@ -536,6 +507,8 @@ router.delete(
           )
         );
 
+      if (banner?.imageFileId) { try { await deleteFile(banner.imageFileId); } catch (error) { console.warn('[Banners DELETE] ImageKit:', error.message); } }
+
       if (!banner) {
         return res.status(404).json({
           message:
@@ -579,14 +552,9 @@ router.post(
         });
       }
 
-      const url =
-        `/uploads/banners/${req.file.filename}`;
-
-      return res.json({
-        message:
-          'تم رفع الصورة بنجاح',
-        url,
-      });
+      const applicationId = getApplicationId(req) || getWriteApplicationId(req, req.body || {});
+      const remote = await uploadBanner(req, applicationId);
+      return res.json({ message: 'تم رفع الصورة بنجاح', url: remote.url, fileId: remote.fileId });
     } catch (error) {
       console.error(
         '[Banners UPLOAD]',

@@ -7,38 +7,23 @@ const crypto = require('crypto');
 const Application = require('../models/Application');
 const User = require('../models/User');
 const { auth, requireRole, publicUser } = require('../middleware/auth');
+const { uploadBuffer, deleteFile, isConfigured } = require('../services/imagekitStorage');
 
 const router = express.Router();
 
 const uploadDir = path.join(__dirname, '..', 'uploads', 'application-logos');
 fs.mkdirSync(uploadDir, { recursive: true });
-
-const allowedMimeTypes = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-]);
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    cb(null, `logo-${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
-  },
-});
-
+const allowedMimeTypes = new Set(['image/jpeg','image/png','image/webp','image/gif']);
 const uploadLogo = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (!allowedMimeTypes.has(file.mimetype)) {
-      return cb(new Error('صيغة الشعار غير مدعومة. استخدم PNG أو JPG أو WEBP أو GIF'));
-    }
-    cb(null, true);
-  },
+  fileFilter: (_req,file,cb) => allowedMimeTypes.has(file.mimetype) ? cb(null,true) : cb(new Error('صيغة الشعار غير مدعومة. استخدم PNG أو JPG أو WEBP أو GIF')),
 });
-
+async function saveLogo(req, applicationId){
+  if(!req.file)return null;
+  if(!isConfigured()){const e=new Error('تخزين الصور غير مهيأ. أضف إعدادات ImageKit إلى Railway.');e.status=503;throw e;}
+  return uploadBuffer({buffer:req.file.buffer,fileName:req.file.originalname,contentType:req.file.mimetype,folder:`applications/${applicationId}`,tags:['iptv','application-logo',String(applicationId)]});
+}
 function normalizeSlug(value) {
   return String(value || '')
     .trim()
@@ -81,14 +66,10 @@ function localUploadPathFromUrl(value) {
   return path.join(uploadDir, filename);
 }
 
-function removeOldLogo(value) {
-  const filePath = localUploadPathFromUrl(value);
-  if (!filePath) return;
-  try {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  } catch (error) {
-    console.warn('[APPLICATIONS] failed to delete old logo:', error.message);
-  }
+async function removeOldLogo(value,fileId=''){
+  if(fileId){try{await deleteFile(fileId)}catch(e){console.warn('[APPLICATIONS] ImageKit delete:',e.message)}return;}
+  const filePath=localUploadPathFromUrl(value); if(!filePath)return;
+  try{if(fs.existsSync(filePath))fs.unlinkSync(filePath)}catch(e){console.warn('[APPLICATIONS] legacy logo delete:',e.message)}
 }
 
 function mapMultipartValue(value, fallback) {
@@ -132,15 +113,16 @@ router.post('/', requireRole('super_admin'), uploadLogo.single('logo'), async (r
     if (await Application.exists({ slug })) return res.status(409).json({ message: 'معرف التطبيق مستخدم بالفعل' });
     if (await User.exists({ username: ownerUsername })) return res.status(409).json({ message: 'اسم مستخدم المالك مستخدم بالفعل' });
 
-    const uploadedLogo = req.file ? `/uploads/application-logos/${req.file.filename}` : '';
     const suppliedLogoUrl = String(req.body?.logoUrl || '').trim();
-    const logoUrl = uploadedLogo || suppliedLogoUrl;
+    const remoteLogo = req.file ? await saveLogo(req, `new-${Date.now()}`) : null;
+    const logoUrl = remoteLogo?.url || suppliedLogoUrl;
 
     const app = await Application.create({
       name,
       slug,
       description: req.body?.description || '',
       logoUrl,
+      logoFileId: remoteLogo?.fileId || '',
       isActive: String(req.body?.isActive ?? 'true') !== 'false',
     });
 
@@ -156,7 +138,7 @@ router.post('/', requireRole('super_admin'), uploadLogo.single('logo'), async (r
       res.status(201).json(toApplicationResponse(req, app, user));
     } catch (error) {
       await Application.findByIdAndDelete(app._id);
-      if (req.file) removeOldLogo(uploadedLogo);
+      if (remoteLogo?.fileId) await removeOldLogo('', remoteLogo.fileId);
       throw error;
     }
   } catch (error) {
@@ -181,7 +163,7 @@ router.get('/me', requireRole('app_owner'), async (req, res) => {
 });
 
 router.put('/me', requireRole('app_owner'), uploadLogo.single('logo'), async (req, res) => {
-  let uploadedLogo = req.file ? `/uploads/application-logos/${req.file.filename}` : '';
+  let uploadedLogo = null;
   let applicationSaved = false;
   try {
     if (!req.user.applicationId) {
@@ -203,15 +185,18 @@ router.put('/me', requireRole('app_owner'), uploadLogo.single('logo'), async (re
     }
 
     const previousLogo = app.logoUrl;
+    const previousLogoFileId = app.logoFileId || '';
     const previousName = app.name;
+    const remoteLogo = req.file ? await saveLogo(req, String(app._id)) : null;
+    uploadedLogo = remoteLogo;
     app.name = name;
     app.description = description;
-    if (uploadedLogo) app.logoUrl = uploadedLogo;
-    else if (req.body?.logoUrl !== undefined) app.logoUrl = String(req.body.logoUrl || '').trim();
+    if (remoteLogo) { app.logoUrl = remoteLogo.url; app.logoFileId = remoteLogo.fileId; }
+    else if (req.body?.logoUrl !== undefined) { app.logoUrl = String(req.body.logoUrl || '').trim(); if (req.body?.logoFileId !== undefined) app.logoFileId = String(req.body.logoFileId || '').trim(); }
     await app.save();
     applicationSaved = true;
 
-    if (uploadedLogo && previousLogo && previousLogo !== uploadedLogo) removeOldLogo(previousLogo);
+    if (remoteLogo && previousLogo !== remoteLogo.url) await removeOldLogo(previousLogo, previousLogoFileId);
 
     // Keep the owner display name useful when it was still equal to the old app name.
     const owner = await User.findById(req.user.id);
@@ -224,7 +209,7 @@ router.put('/me', requireRole('app_owner'), uploadLogo.single('logo'), async (re
 
     res.json(toApplicationResponse(req, app, owner || null));
   } catch (error) {
-    if (req.file && !applicationSaved) removeOldLogo(uploadedLogo);
+    if (req.file && !applicationSaved && uploadedLogo?.fileId) await removeOldLogo('', uploadedLogo.fileId);
     console.error('[APPLICATIONS] update own app', error);
     res.status(error.status || 400).json({ message: error.message || 'فشل تعديل التطبيق' });
   }
@@ -232,7 +217,7 @@ router.put('/me', requireRole('app_owner'), uploadLogo.single('logo'), async (re
 
 
 router.put('/:id', requireRole('super_admin'), uploadLogo.single('logo'), async (req, res) => {
-  let uploadedLogo = req.file ? `/uploads/application-logos/${req.file.filename}` : '';
+  let uploadedLogo = null;
   let applicationSaved = false;
   try {
     const app = await Application.findById(req.params.id);
@@ -253,16 +238,19 @@ router.put('/:id', requireRole('super_admin'), uploadLogo.single('logo'), async 
     }
 
     const previousLogo = app.logoUrl;
+    const previousLogoFileId = app.logoFileId || '';
+    const remoteLogo = req.file ? await saveLogo(req, String(app._id)) : null;
+    uploadedLogo = remoteLogo;
     app.name = nextName;
     app.slug = nextSlug;
     app.description = mapMultipartValue(req.body?.description, app.description);
-    if (uploadedLogo) app.logoUrl = uploadedLogo;
-    else if (req.body?.logoUrl !== undefined) app.logoUrl = String(req.body.logoUrl || '').trim();
+    if (remoteLogo) { app.logoUrl = remoteLogo.url; app.logoFileId = remoteLogo.fileId; }
+    else if (req.body?.logoUrl !== undefined) { app.logoUrl = String(req.body.logoUrl || '').trim(); if (req.body?.logoFileId !== undefined) app.logoFileId = String(req.body.logoFileId || '').trim(); }
     app.isActive = String(mapMultipartValue(req.body?.isActive, app.isActive)) !== 'false';
     await app.save();
     applicationSaved = true;
 
-    if (uploadedLogo && previousLogo && previousLogo !== uploadedLogo) removeOldLogo(previousLogo);
+    if (remoteLogo && previousLogo !== remoteLogo.url) await removeOldLogo(previousLogo, previousLogoFileId);
 
     if (req.body?.ownerUsername || req.body?.ownerPassword || req.body?.ownerDisplayName !== undefined || req.body?.ownerActive !== undefined) {
       const owner = await User.findOne({ role: 'app_owner', applicationId: app._id });
@@ -282,7 +270,7 @@ router.put('/:id', requireRole('super_admin'), uploadLogo.single('logo'), async 
     const owner = await User.findOne({ role: 'app_owner', applicationId: app._id }).lean();
     res.json(toApplicationResponse(req, app, owner || null));
   } catch (error) {
-    if (req.file && !applicationSaved) removeOldLogo(uploadedLogo);
+    if (req.file && !applicationSaved && uploadedLogo?.fileId) await removeOldLogo('', uploadedLogo.fileId);
     console.error('[APPLICATIONS] update', error);
     res.status(error.code === 11000 ? 409 : error.status || 400).json({ message: error.message || 'فشل تعديل التطبيق' });
   }
@@ -307,7 +295,7 @@ router.delete('/:id', requireRole('super_admin'), async (req, res) => {
       User.deleteMany({ applicationId: app._id, role: 'app_owner' }),
       Application.deleteOne({ _id: app._id }),
     ]);
-    removeOldLogo(app.logoUrl);
+    await removeOldLogo(app.logoUrl, app.logoFileId || '');
     res.json({ message: 'تم حذف التطبيق ومالكه' });
   } catch (error) {
     res.status(400).json({ message: error.message || 'فشل الحذف' });

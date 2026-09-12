@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { createRateLimiter } = require('./middleware/rateLimit');
 
 const app = express();
 
@@ -66,6 +67,25 @@ const allowedOrigins = String(
   .map((value) => value.trim())
   .filter(Boolean);
 
+const JWT_SECRET = String(process.env.JWT_SECRET || '').trim();
+const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || '').trim();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+
+if (IS_PRODUCTION) {
+  if (JWT_SECRET.length < 32 || /^your_|change-me|change_me|secret$/i.test(JWT_SECRET)) {
+    console.error('❌ Production JWT_SECRET must be a strong secret of at least 32 characters.');
+    process.exit(1);
+  }
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    console.error('❌ ADMIN_USERNAME and ADMIN_PASSWORD are required in production.');
+    process.exit(1);
+  }
+  if (allowedOrigins.length === 0) {
+    console.error('❌ CLIENT_ORIGIN is required in production.');
+    process.exit(1);
+  }
+}
+
 /* ============================================================
  * Validation
  * ============================================================ */
@@ -117,6 +137,14 @@ if (IS_PRODUCTION) {
 
 app.disable('x-powered-by');
 
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
 /* ============================================================
  * CORS
  * ============================================================ */
@@ -143,18 +171,11 @@ app.use(
       }
 
       /*
-       * إذا لم يتم تحديد CLIENT_ORIGIN
-       * نسمح بكل origins.
-       *
-       * مناسب للتطوير.
+       * في الإنتاج نرفض browser origins غير المعروفة.
+       * في التطوير فقط نسمح بكل origins.
        */
-      if (
-        allowedOrigins.length === 0
-      ) {
-        return callback(
-          null,
-          true,
-        );
+      if (allowedOrigins.length === 0 && !IS_PRODUCTION) {
+        return callback(null, true);
       }
 
       if (
@@ -208,7 +229,7 @@ app.use(
   express.json({
     limit:
       process.env.JSON_BODY_LIMIT ||
-      '4mb',
+      '1mb',
   }),
 );
 
@@ -217,9 +238,15 @@ app.use(
     extended: true,
     limit:
       process.env.URLENCODED_BODY_LIMIT ||
-      '4mb',
+      '1mb',
   }),
 );
+
+const publicRateLimit = createRateLimiter({
+  windowMs: 60_000,
+  max: Number(process.env.PUBLIC_RATE_LIMIT || 180),
+  message: 'طلبات كثيرة جدًا، حاول مرة أخرى بعد قليل',
+});
 
 /* ============================================================
  * Uploads
@@ -327,6 +354,7 @@ const themesModule =
 
 const bannersModule =
   require('./routes/banners');
+const storageModule = require('./routes/storage');
 
 const devicesModule =
   require('./routes/devices');
@@ -474,6 +502,8 @@ app.use(
   themes,
 );
 
+app.use('/api/storage', storageModule);
+
 app.use(
   '/api/banners',
   banners,
@@ -501,6 +531,7 @@ app.use(
 
 app.use(
   '/api/app-config',
+  publicRateLimit,
   appConfig,
 );
 
@@ -526,6 +557,10 @@ app.use(
 
 app.use(
   '/api/remote-updates',
+  (req, res, next) => {
+    if (req.path.startsWith('/public/')) return publicRateLimit(req, res, next);
+    next();
+  },
   remoteUpdates,
 );
 
@@ -616,6 +651,18 @@ app.get(
     });
   },
 );
+
+app.get('/api/health/ready', async (_req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ ok: false, mongodb: false });
+    }
+    await mongoose.connection.db.admin().ping();
+    return res.json({ ok: true, mongodb: true });
+  } catch {
+    return res.status(503).json({ ok: false, mongodb: false });
+  }
+});
 
 /* ============================================================
  * Root
@@ -819,6 +866,16 @@ async function connectMongoDB() {
           process.env.MONGODB_SOCKET_TIMEOUT ||
           45000,
         ),
+      maxPoolSize:
+        Number(process.env.MONGODB_MAX_POOL_SIZE || 100),
+      minPoolSize:
+        Number(process.env.MONGODB_MIN_POOL_SIZE || 5),
+      maxIdleTimeMS:
+        Number(process.env.MONGODB_MAX_IDLE_TIME_MS || 120000),
+      waitQueueTimeoutMS:
+        Number(process.env.MONGODB_WAIT_QUEUE_TIMEOUT_MS || 10000),
+      autoIndex: false,
+      bufferCommands: false,
     },
   );
 
@@ -895,13 +952,23 @@ async function runThemeCleanup() {
  * ============================================================ */
 
 async function syncIndexes() {
+  if (String(process.env.SYNC_INDEXES_ON_START || '').toLowerCase() !== 'true') {
+    console.log('[INDEX] Startup index sync disabled (recommended for production).');
+    return;
+  }
+
   const indexedModels = [
+    'User',
+    'Application',
+    'Theme',
     'Setting',
     'DeviceMac',
     'MacUser',
     'Banner',
     'Entity',
     'DnsEntry',
+    'Notification',
+    'NotificationCounter',
   ];
 
   for (

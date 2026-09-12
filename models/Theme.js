@@ -24,6 +24,8 @@ const schema = new mongoose.Schema(
       trim: true,
     },
 
+    previewFileId: { type: String, default: '', trim: true },
+
     description: {
       type: String,
       default: '',

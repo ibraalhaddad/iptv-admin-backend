@@ -6,6 +6,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { uploadBuffer, deleteFile, isConfigured } = require('../services/imagekitStorage');
 
 const Theme = require('../models/Theme');
 const Setting = require('../models/Setting');
@@ -18,127 +19,27 @@ const {
 
 const router = express.Router();
 
+/* Legacy built-in themes that must remain protected from deletion. */
+const BUILTIN_THEME_IDS = new Set([
+  'theme_01',
+  'theme_02',
+  'theme_03',
+]);
+
 /* ========================================================================= */
 /* Upload directory                                                         */
 /* ========================================================================= */
 
-const uploadDir = path.join(
-  __dirname,
-  '..',
-  'uploads',
-  'themes',
-);
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, {
-    recursive: true,
-  });
+const uploadDir = path.join(__dirname,'..','uploads','themes');
+if(!fs.existsSync(uploadDir))fs.mkdirSync(uploadDir,{recursive:true});
+const upload = multer({
+ storage: multer.memoryStorage(), limits:{fileSize:5*1024*1024},
+ fileFilter: (_req,file,cb)=>{const ok=['image/jpeg','image/png','image/webp','image/svg+xml'].includes(file.mimetype);cb(ok?null:new Error('نوع الصورة غير مدعوم'),ok);}
+});
+async function uploadThemePreview(req,themeId){
+ if(!req.file)return null;if(!isConfigured()){const e=new Error('تخزين الصور غير مهيأ. أضف إعدادات ImageKit.');e.status=503;throw e;}
+ return uploadBuffer({buffer:req.file.buffer,fileName:req.file.originalname,contentType:req.file.mimetype,folder:`themes/${themeId}`,tags:['iptv','theme-preview',String(themeId)]});
 }
-
-/* ========================================================================= */
-/* Multer                                                                   */
-/* ========================================================================= */
-
-const storage =
-  multer.diskStorage({
-    destination: (
-      _req,
-      _file,
-      cb,
-    ) => {
-      cb(
-        null,
-        uploadDir,
-      );
-    },
-
-    filename: (
-      _req,
-      file,
-      cb,
-    ) => {
-      const ext =
-        path.extname(
-          file.originalname || '',
-        ).toLowerCase() ||
-        '.png';
-
-      const filename =
-        Date.now() +
-        '-' +
-        Math.random()
-          .toString(36)
-          .substring(
-            2,
-            10,
-          ) +
-        ext;
-
-      cb(
-        null,
-        filename,
-      );
-    },
-  });
-
-const upload =
-  multer({
-    storage,
-
-    limits: {
-      fileSize:
-        5 * 1024 * 1024,
-    },
-
-    fileFilter: (
-      _req,
-      file,
-      cb,
-    ) => {
-      const allowedTypes = [
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-        'image/svg+xml',
-      ];
-
-      if (
-        !allowedTypes.includes(
-          file.mimetype,
-        )
-      ) {
-        return cb(
-          new Error(
-            'نوع الصورة غير مدعوم',
-          ),
-        );
-      }
-
-      cb(
-        null,
-        true,
-      );
-    },
-  });
-
-/* ========================================================================= */
-/* Legacy built-in themes                                                   */
-/* ========================================================================= */
-
-/*
- * هذه الثيمات كانت موجودة في النسخة القديمة
- * وتعتمد على ملفات public/theme-previews.
- *
- * لن يتم عرضها.
- * ولن يتم إنشاؤها مجددًا.
- */
-
-const BUILTIN_THEME_IDS =
-  new Set([
-    'theme_01',
-    'theme_02',
-    'theme_03',
-  ]);
 
 function isBuiltInTheme(
   theme,
@@ -1394,14 +1295,9 @@ router.post(
         });
       }
 
-      const previewImage =
-        req.file
-          ? `/uploads/themes/${req.file.filename}`
-          : String(
-              req.body
-                ?.previewImage ||
-                '',
-            ).trim();
+      const remotePreview = req.file ? await uploadThemePreview(req, themeId) : null;
+      const previewImage = remotePreview?.url || String(req.body?.previewImage || '').trim();
+      const previewFileId = remotePreview?.fileId || '';
 
       /*
        * لا نسمح بإدخال صور الثيمات
@@ -1425,6 +1321,7 @@ router.post(
           themeId,
           name,
           previewImage,
+          previewFileId,
           description:
             String(
               req.body
@@ -1665,12 +1562,13 @@ router.put(
       }
 
       if (req.file) {
-        removeThemeImage(
-          theme.previewImage,
-        );
-
-        theme.previewImage =
-          `/uploads/themes/${req.file.filename}`;
+        const remotePreview = await uploadThemePreview(req, theme.themeId);
+        const oldFileId = theme.previewFileId || '';
+        const oldUrl = theme.previewImage;
+        theme.previewImage = remotePreview.url;
+        theme.previewFileId = remotePreview.fileId;
+        if (oldFileId) { try { await deleteFile(oldFileId); } catch (error) { console.warn('[THEMES] ImageKit delete:', error.message); } }
+        else removeThemeImage(oldUrl);
       } else if (
         req.body
           ?.previewImage !==
@@ -1695,8 +1593,12 @@ router.put(
           });
         }
 
-        theme.previewImage =
-          nextPreviewImage;
+        const previousPreviewFileId = theme.previewFileId || '';
+        theme.previewImage = nextPreviewImage;
+        if (req.body?.previewFileId !== undefined) {
+          theme.previewFileId = String(req.body.previewFileId || '').trim();
+          if (previousPreviewFileId && previousPreviewFileId !== theme.previewFileId) { try { await deleteFile(previousPreviewFileId); } catch (error) { console.warn('[THEMES] ImageKit delete:', error.message); } }
+        }
       }
 
       await theme.save();
@@ -1826,9 +1728,15 @@ router.delete(
         ],
       });
 
-      removeThemeImage(
-        theme.previewImage,
-      );
+      if (theme.previewFileId) {
+        try {
+          await deleteFile(theme.previewFileId);
+        } catch (error) {
+          console.warn('[THEMES] ImageKit delete:', error.message);
+        }
+      } else {
+        removeThemeImage(theme.previewImage);
+      }
 
       await Theme.deleteOne({
         themeId:

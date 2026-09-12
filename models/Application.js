@@ -5,6 +5,8 @@ const schema = new mongoose.Schema({
   slug: { type: String, required: true, unique: true, index: true, trim: true, lowercase: true },
   description: { type: String, default: '' },
   logoUrl: { type: String, default: '' },
+
+  logoFileId: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   settings: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, { timestamps: true });

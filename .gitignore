@@ -1,2 +1,8 @@
 node_modules/
 .env
+.env.*
+!.env.example
+npm-debug.log*
+uploads/*
+!uploads/.gitkeep
+# Runtime uploads are legacy compatibility only; primary assets live in ImageKit.

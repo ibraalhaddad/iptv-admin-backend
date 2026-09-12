@@ -1,6 +1,17 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const USER_CACHE_TTL_MS = Math.max(
+  1000,
+  Number(process.env.AUTH_USER_CACHE_TTL_MS || 5000),
+);
+const USER_CACHE_MAX = Math.max(
+  100,
+  Number(process.env.AUTH_USER_CACHE_MAX || 5000),
+);
+
+const userCache = new Map();
+
 function getToken(req) {
   const header = req.headers.authorization || '';
   return header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -20,13 +31,47 @@ function signUser(user) {
   );
 }
 
+async function loadUser(id) {
+  const key = String(id);
+  const now = Date.now();
+  const cached = userCache.get(key);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.user;
+  }
+
+  const user = await User.findById(key)
+    .select('_id username displayName role applicationId isActive')
+    .lean();
+
+  if (user) {
+    userCache.set(key, {
+      user,
+      expiresAt: now + USER_CACHE_TTL_MS,
+    });
+    if (userCache.size > USER_CACHE_MAX) {
+      const firstKey = userCache.keys().next().value;
+      if (firstKey) userCache.delete(firstKey);
+    }
+  } else {
+    userCache.delete(key);
+  }
+
+  return user;
+}
+
+function invalidateUserCache(id) {
+  if (id) userCache.delete(String(id));
+}
+
 async function auth(req, res, next) {
   const token = getToken(req);
   if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(payload.sub).lean();
+    const user = await loadUser(payload.sub);
+
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'الحساب غير موجود أو معطل' });
     }
@@ -40,7 +85,7 @@ async function auth(req, res, next) {
     };
     req.authPayload = payload;
     next();
-  } catch (error) {
+  } catch {
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
 }
@@ -97,7 +142,13 @@ function scopeFilter(req, filter = {}) {
 
 function getWriteApplicationId(req, body = {}) {
   if (req.user?.role === 'super_admin') {
-    return bodyOrHeaderApplicationId(req, body);
+    const applicationId = bodyOrHeaderApplicationId(req, body);
+    if (!applicationId) {
+      const error = new Error('يجب تحديد التطبيق');
+      error.status = 400;
+      throw error;
+    }
+    return applicationId;
   }
   if (!req.user?.applicationId) {
     const error = new Error('الحساب غير مرتبط بتطبيق');
@@ -127,4 +178,6 @@ module.exports = {
   publicUser,
   signUser,
   getSelectedApplicationId,
+  invalidateUserCache,
+  ROLE_PERMISSIONS,
 };

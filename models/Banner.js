@@ -38,6 +38,8 @@ const bannerSchema = new mongoose.Schema(
       trim: true,
     },
 
+    imageFileId: { type: String, default: '', trim: true },
+
     buttonText: {
       type: String,
       default: '',
@@ -96,6 +98,13 @@ bannerSchema.index({
   applicationId: 1,
   isActive: 1,
   sortOrder: 1,
+});
+
+bannerSchema.index({
+  applicationId: 1,
+  isActive: 1,
+  startAt: 1,
+  endAt: 1,
 });
 
 /*

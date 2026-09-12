@@ -257,8 +257,13 @@ router.get(
 
           createdAt:
             -1,
-        });
+        })
+          .select(
+            '_id bannerId applicationId title description imageUrl buttonText actionType actionId sortOrder isActive startAt endAt'
+          )
+          .lean();
 
+      res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
       return res.json({
         success:
           true,
@@ -373,7 +378,11 @@ router.get(
 
             createdAt:
               -1,
-          }),
+          })
+            .select(
+              '_id bannerId applicationId title description imageUrl buttonText actionType actionId sortOrder isActive startAt endAt'
+            )
+            .lean(),
 
           // ----------------------------------------------------
           // Application
@@ -398,7 +407,9 @@ router.get(
                 'dns_fourth',
               ],
             },
-          }).lean(),
+          })
+            .select('key value -_id')
+            .lean(),
 
           // ----------------------------------------------------
           // Official DNS source
@@ -487,16 +498,6 @@ router.get(
               entry.updatedAt,
           }),
         );
-
-      console.log(
-        '[APP-CONFIG] Application:',
-        applicationId,
-      );
-
-      console.log(
-        '[APP-CONFIG] Active DNS count:',
-        dns.length,
-      );
 
       // لا نسجل كلمات المرور أو بيانات حساسة.
 

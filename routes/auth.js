@@ -4,6 +4,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 
 const User = require('../models/User');
+const { createRateLimiter } = require('../middleware/rateLimit');
 
 const {
   auth,
@@ -20,13 +21,13 @@ const router = express.Router();
  */
 async function ensureBootstrap() {
   const username = String(
-    process.env.ADMIN_USERNAME || 'admin'
+    process.env.ADMIN_USERNAME || process.env.ADMIN_USER || ''
   )
     .trim()
     .toLowerCase();
 
   const password = String(
-    process.env.ADMIN_PASSWORD || 'admin123'
+    process.env.ADMIN_PASSWORD || process.env.ADMIN_PASS || ''
   );
 
   if (!username) {
@@ -179,7 +180,13 @@ async function ensureBootstrap() {
  * POST /api/auth/login
  * ============================================================
  */
-router.post('/login', async (req, res) => {
+const loginRateLimit = createRateLimiter({
+  windowMs: 15 * 60_000,
+  max: 8,
+  message: 'محاولات تسجيل الدخول كثيرة. حاول مرة أخرى لاحقًا',
+});
+
+router.post('/login', loginRateLimit, async (req, res) => {
   try {
     const username = String(
       req.body?.username || ''
@@ -200,11 +207,6 @@ router.post('/login', async (req, res) => {
           'أدخل اسم المستخدم وكلمة المرور',
       });
     }
-
-    // --------------------------------------------------------
-    // التأكد من وجود حساب المدير الرئيسي
-    // --------------------------------------------------------
-    await ensureBootstrap();
 
     // --------------------------------------------------------
     // البحث عن المستخدم

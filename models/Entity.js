@@ -46,6 +46,12 @@ schema.index({
   sortOrder: 1,
 });
 
+schema.index({
+  applicationId: 1,
+  type: 1,
+  'data.status': 1,
+});
+
 module.exports = mongoose.model(
   'Entity',
   schema

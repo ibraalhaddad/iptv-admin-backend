@@ -49,6 +49,12 @@ const notificationSchema =
         trim: true,
       },
 
+      imageFileId: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+
       actionType: {
         type: String,
         enum: [

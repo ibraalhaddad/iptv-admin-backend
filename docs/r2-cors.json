@@ -1,0 +1,12 @@
+[
+  {
+    "AllowedOrigins": [
+      "https://iptv-admin-panel-nu.vercel.app",
+      "http://localhost:5173"
+    ],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type", "Cache-Control"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]

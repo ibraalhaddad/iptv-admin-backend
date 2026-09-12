@@ -238,6 +238,11 @@ function cleanPayload(
                 body.imageUrl || ''
             ).trim(),
 
+        imageFileId:
+            String(
+                body.imageFileId || ''
+            ).trim(),
+
         actionType:
             body.actionType ||
             'none',
@@ -787,6 +792,8 @@ router.post(
 
                     imageUrl:
                         payload.imageUrl,
+                    imageFileId:
+                        String(payload.imageFileId || '').trim(),
 
                     actionType:
                         payload.actionType,
@@ -967,6 +974,9 @@ router.put(
 
             notification.imageUrl =
                 payload.imageUrl;
+            if (payload.imageFileId !== undefined) {
+              notification.imageFileId = String(payload.imageFileId || '').trim();
+            }
 
             notification.actionType =
                 payload.actionType;

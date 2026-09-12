@@ -7,4 +7,5 @@ const schema = new mongoose.Schema({
  username:{type:String,required:true}, name:{type:String,default:''}, email:{type:String,default:''}, phone:{type:String,default:''}, passwordHash:{type:String,default:''}, isActive:{type:Boolean,default:true}, notes:{type:String,default:''}, devices:{type:[deviceSchema],default:[]}
 },{timestamps:true});
 schema.index({applicationId:1,username:1},{unique:true});
+schema.index({applicationId:1,createdAt:-1});
 module.exports = mongoose.model('MacUser',schema);
