@@ -9,8 +9,6 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
 const { createRateLimiter } = require('./middleware/rateLimit');
 
 const app = express();
@@ -249,59 +247,11 @@ const publicRateLimit = createRateLimiter({
 });
 
 /* ============================================================
- * Uploads
+ * Asset storage
  * ============================================================ */
 
-const uploadsDirectory =
-  path.join(
-    __dirname,
-    'uploads',
-  );
-
-/*
- * إنشاء مجلد uploads إذا لم يكن موجودًا.
- */
-try {
-  fs.mkdirSync(
-    uploadsDirectory,
-    {
-      recursive: true,
-    },
-  );
-} catch (error) {
-  console.error(
-    '❌ Failed to create uploads directory:',
-    error,
-  );
-
-  process.exit(1);
-}
-
-/*
- * الملفات المرفوعة:
- *
- * /uploads/*
- */
-app.use(
-  '/uploads',
-  express.static(
-    uploadsDirectory,
-    {
-      fallthrough: true,
-
-      /*
-       * Cache للصور والملفات الثابتة.
-       */
-      maxAge: IS_PRODUCTION
-        ? '7d'
-        : 0,
-
-      etag: true,
-
-      index: false,
-    },
-  ),
-);
+/* All uploaded images are stored in ImageKit. The service never writes
+ * persistent assets to the container filesystem. */
 
 /* ============================================================
  * Helpers
@@ -686,8 +636,8 @@ app.get(
       health:
         '/api/health',
 
-      uploads:
-        '/uploads/',
+      imageStorage:
+        'ImageKit',
     });
   },
 );
@@ -867,9 +817,9 @@ async function connectMongoDB() {
           45000,
         ),
       maxPoolSize:
-        Number(process.env.MONGODB_MAX_POOL_SIZE || 100),
+        Number(process.env.MONGODB_MAX_POOL_SIZE || 10),
       minPoolSize:
-        Number(process.env.MONGODB_MIN_POOL_SIZE || 5),
+        Number(process.env.MONGODB_MIN_POOL_SIZE || 1),
       maxIdleTimeMS:
         Number(process.env.MONGODB_MAX_IDLE_TIME_MS || 120000),
       waitQueueTimeoutMS:
@@ -1138,11 +1088,7 @@ async function startHttpServer() {
         console.log('');
 
         console.log(
-          '📤 Uploads:',
-        );
-
-        console.log(
-          '   /uploads/*',
+          '🖼️ Image storage: ImageKit',
         );
 
         console.log('');
@@ -1334,7 +1280,7 @@ async function start() {
     );
 
     console.log(
-      `📤 Uploads: ${uploadsDirectory}`,
+      '🖼️ Image storage: ImageKit',
     );
 
     console.log(

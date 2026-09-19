@@ -3,8 +3,6 @@
 // ============================================================
 
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const multer = require('multer');
 const { uploadBuffer, deleteFile, isConfigured } = require('../services/imagekitStorage');
 
@@ -27,11 +25,9 @@ const BUILTIN_THEME_IDS = new Set([
 ]);
 
 /* ========================================================================= */
-/* Upload directory                                                         */
+/* ImageKit upload                                                         */
 /* ========================================================================= */
 
-const uploadDir = path.join(__dirname,'..','uploads','themes');
-if(!fs.existsSync(uploadDir))fs.mkdirSync(uploadDir,{recursive:true});
 const upload = multer({
  storage: multer.memoryStorage(), limits:{fileSize:5*1024*1024},
  fileFilter: (_req,file,cb)=>{const ok=['image/jpeg','image/png','image/webp','image/svg+xml'].includes(file.mimetype);cb(ok?null:new Error('نوع الصورة غير مدعوم'),ok);}
@@ -496,62 +492,9 @@ function getApplicationId(
 /* Remove uploaded image                                                    */
 /* ========================================================================= */
 
-function removeThemeImage(
-  imageUrl,
-) {
-  if (!imageUrl) {
-    return;
-  }
-
-  if (
-    !String(
-      imageUrl,
-    ).startsWith(
-      '/uploads/themes/',
-    )
-  ) {
-    return;
-  }
-
-  const fileName =
-    String(
-      imageUrl,
-    ).replace(
-      '/uploads/themes/',
-      '',
-    );
-
-  if (
-    !fileName ||
-    fileName.includes(
-      '..',
-    )
-  ) {
-    return;
-  }
-
-  const filePath =
-    path.join(
-      uploadDir,
-      fileName,
-    );
-
-  try {
-    if (
-      fs.existsSync(
-        filePath,
-      )
-    ) {
-      fs.unlinkSync(
-        filePath,
-      );
-    }
-  } catch (error) {
-    console.warn(
-      '[THEMES] remove image:',
-      error.message,
-    );
-  }
+function removeThemeImage(_imageUrl) {
+  // Legacy local uploads are no longer writable in Deplexo.
+  // Current assets are stored and deleted through ImageKit fileId.
 }
 
 /* ========================================================================= */

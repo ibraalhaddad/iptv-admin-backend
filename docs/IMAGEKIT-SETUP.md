@@ -1,12 +1,36 @@
 # ImageKit setup
 
-The backend keeps the dashboard API compatible while moving new image uploads from Railway local disk to ImageKit. Existing `/uploads/*` files remain readable during migration.
+This backend stores all uploaded application logos, banners, theme previews, and notification images in ImageKit. No persistent image files are written to the application container.
 
-Railway variables:
+## Required environment variables
+
 - `IMAGEKIT_PUBLIC_KEY`
 - `IMAGEKIT_PRIVATE_KEY`
 - `IMAGEKIT_URL_ENDPOINT`
 
-Then run `npm run storage:check`. For legacy local assets: `npm run storage:migrate:dry`, then `npm run storage:migrate`.
+Optional tuning:
 
-The generic endpoint is `POST /api/storage/upload` with multipart `file` and `kind` (`banner`, `application-logo`, `notification`, `theme`). The existing dashboard endpoints for banner uploads, application logos, and theme previews continue to work and now write to ImageKit.
+- `IMAGEKIT_UPLOAD_TIMEOUT_MS=60000`
+- `IMAGEKIT_DELETE_TIMEOUT_MS=15000`
+- `IMAGEKIT_MIGRATION_BATCH_SIZE=25`
+
+Keep `IMAGEKIT_PRIVATE_KEY` server-side only. Do not commit `.env` or any secret keys to GitHub.
+
+## Upload API
+
+The authenticated generic endpoint is:
+
+`POST /api/storage/upload`
+
+Use a multipart field named `file` and `kind` set to one of:
+
+- `banner`
+- `application-logo`
+- `notification`
+- `theme`
+
+Existing dashboard endpoints for applications, banners, and themes also upload directly to ImageKit.
+
+## Deplexo
+
+The project is configured for Deplexo with a read-only container filesystem. ImageKit is therefore the only persistent image storage layer. MongoDB remains external and persistent.

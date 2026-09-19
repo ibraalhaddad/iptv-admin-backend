@@ -1,8 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 const Application = require('../models/Application');
 const User = require('../models/User');
@@ -11,8 +9,6 @@ const { uploadBuffer, deleteFile, isConfigured } = require('../services/imagekit
 
 const router = express.Router();
 
-const uploadDir = path.join(__dirname, '..', 'uploads', 'application-logos');
-fs.mkdirSync(uploadDir, { recursive: true });
 const allowedMimeTypes = new Set(['image/jpeg','image/png','image/webp','image/gif']);
 const uploadLogo = multer({
   storage: multer.memoryStorage(),
@@ -21,7 +17,7 @@ const uploadLogo = multer({
 });
 async function saveLogo(req, applicationId){
   if(!req.file)return null;
-  if(!isConfigured()){const e=new Error('تخزين الصور غير مهيأ. أضف إعدادات ImageKit إلى Railway.');e.status=503;throw e;}
+  if(!isConfigured()){const e=new Error('تخزين الصور غير مهيأ. أضف إعدادات ImageKit إلى متغيرات البيئة في الاستضافة.');e.status=503;throw e;}
   return uploadBuffer({buffer:req.file.buffer,fileName:req.file.originalname,contentType:req.file.mimetype,folder:`applications/${applicationId}`,tags:['iptv','application-logo',String(applicationId)]});
 }
 function normalizeSlug(value) {
@@ -48,28 +44,13 @@ function toApplicationResponse(req, app, owner = null) {
   };
 }
 
-function localUploadPathFromUrl(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-
-  let pathname = raw;
+async function removeOldLogo(_value, fileId='') {
+  if (!fileId) return;
   try {
-    if (/^https?:\/\//i.test(raw)) pathname = new URL(raw).pathname;
-  } catch {
-    return null;
+    await deleteFile(fileId);
+  } catch (e) {
+    console.warn('[APPLICATIONS] ImageKit delete:', e.message);
   }
-
-  const prefix = '/uploads/application-logos/';
-  if (!pathname.startsWith(prefix)) return null;
-  const filename = path.basename(pathname);
-  if (!filename || filename === '.' || filename === '..') return null;
-  return path.join(uploadDir, filename);
-}
-
-async function removeOldLogo(value,fileId=''){
-  if(fileId){try{await deleteFile(fileId)}catch(e){console.warn('[APPLICATIONS] ImageKit delete:',e.message)}return;}
-  const filePath=localUploadPathFromUrl(value); if(!filePath)return;
-  try{if(fs.existsSync(filePath))fs.unlinkSync(filePath)}catch(e){console.warn('[APPLICATIONS] legacy logo delete:',e.message)}
 }
 
 function mapMultipartValue(value, fallback) {
@@ -167,20 +148,20 @@ router.put('/me', requireRole('app_owner'), uploadLogo.single('logo'), async (re
   let applicationSaved = false;
   try {
     if (!req.user.applicationId) {
-      if (req.file) removeOldLogo(uploadedLogo);
+  
       return res.status(403).json({ message: 'الحساب غير مرتبط بتطبيق' });
     }
 
     const app = await Application.findById(req.user.applicationId);
     if (!app) {
-      if (req.file) removeOldLogo(uploadedLogo);
+  
       return res.status(404).json({ message: 'التطبيق غير موجود' });
     }
 
     const name = String(req.body?.name ?? app.name).trim();
     const description = String(req.body?.description ?? app.description ?? '');
     if (!name) {
-      if (req.file) removeOldLogo(uploadedLogo);
+  
       return res.status(400).json({ message: 'اسم التطبيق مطلوب' });
     }
 
@@ -222,18 +203,18 @@ router.put('/:id', requireRole('super_admin'), uploadLogo.single('logo'), async 
   try {
     const app = await Application.findById(req.params.id);
     if (!app) {
-      if (req.file) removeOldLogo(uploadedLogo);
+  
       return res.status(404).json({ message: 'التطبيق غير موجود' });
     }
 
     const nextName = String(mapMultipartValue(req.body?.name, app.name)).trim();
     const nextSlug = normalizeSlug(mapMultipartValue(req.body?.slug, app.slug));
     if (!nextName || !nextSlug) {
-      if (req.file) removeOldLogo(uploadedLogo);
+  
       return res.status(400).json({ message: 'اسم التطبيق والمعرف مطلوبان' });
     }
     if (await Application.exists({ slug: nextSlug, _id: { $ne: app._id } })) {
-      if (req.file) removeOldLogo(uploadedLogo);
+  
       return res.status(409).json({ message: 'معرف التطبيق مستخدم بالفعل' });
     }
 
